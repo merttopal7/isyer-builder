@@ -107,29 +107,49 @@ jobs:
       - name: Build Unsigned iOS IPA
         if: steps.mode.outputs.signed == 'false'
         run: |
-          PROJECT=$(find src-tauri/gen/apple -maxdepth 1 -name "*.xcodeproj" | head -n 1)
-          SCHEME=$(xcodebuild -project "$PROJECT" -list -json | python3 -c "import sys,json; print([s for s in json.load(sys.stdin)['project']['schemes'] if s.endswith('_iOS')][0])")
+          mkdir -p "$RUNNER_TEMP/xcode-wrap"
+          cat << 'EOF' > "$RUNNER_TEMP/xcode-wrap/xcodebuild"
+          #!/bin/bash
+          for arg in "$@"; do
+            if [ "$arg" = "archive" ] || [ "$arg" = "build" ]; then
+              exec /usr/bin/xcodebuild "$@" \
+                CODE_SIGNING_ALLOWED=NO \
+                CODE_SIGNING_REQUIRED=NO \
+                CODE_SIGN_IDENTITY="" \
+                AD_HOC_CODE_SIGNING_ALLOWED=YES
+            fi
+            if [ "$arg" = "-exportArchive" ]; then
+              echo "==> Unsigned mod: -exportArchive adımı atlandı (.xcarchive hazır)."
+              exit 0
+            fi
+          done
+          exec /usr/bin/xcodebuild "$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/xcode-wrap/xcodebuild"
 
-          echo "==> Xcode Project: $PROJECT | Scheme: $SCHEME"
-          xcodebuild \
-            -project "$PROJECT" \
-            -scheme "$SCHEME" \
-            -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath src-tauri/gen/apple/DerivedDataUnsigned \
-            ARCHS=arm64 \
-            ONLY_ACTIVE_ARCH=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES \
-            build
+          cat << 'EOF' > "$RUNNER_TEMP/xcode-wrap/xcrun"
+          #!/bin/bash
+          if [ "$1" = "xcodebuild" ]; then
+            shift
+            exec "$RUNNER_TEMP/xcode-wrap/xcodebuild" "$@"
+          fi
+          exec /usr/bin/xcrun "$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/xcode-wrap/xcrun"
 
-          APP_PATH=$(find src-tauri/gen/apple/DerivedDataUnsigned -name "*.app" -path "*/Release-iphoneos/*" | head -n 1)
+          export PATH="$RUNNER_TEMP/xcode-wrap:$PATH"
+          npx tauri ios build --ci || true
+
+          APP_PATH=$(find src-tauri/gen/apple -name "*.app" | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "HATA: .app paketi bulunamadı!"
+            exit 1
+          fi
           echo "==> Üretilen .app: $APP_PATH"
           mkdir -p Payload dist-ipa
           cp -R "$APP_PATH" Payload/
           zip -qry "dist-ipa/Isyer-${TAURI_TARGET}-unsigned.ipa" Payload
+          ls -lh dist-ipa/
 
       - name: Upload iOS .ipa Artifact
         uses: actions/upload-artifact@v4
