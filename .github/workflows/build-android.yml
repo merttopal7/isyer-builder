@@ -1,0 +1,73 @@
+name: Build Android (.apk)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Hangi uygulama derlensin? (my = Üye Uygulaması, app = İşletme Paneli)"
+        required: true
+        default: "my"
+        type: choice
+        options:
+          - my
+          - app
+
+jobs:
+  build-android:
+    name: Android (${{ inputs.target || 'my' }})
+    runs-on: ubuntu-latest
+    env:
+      TAURI_TARGET: ${{ inputs.target || 'my' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK & NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: |
+          sdkmanager --install "ndk;27.0.12077973" "platforms;android-35" "build-tools;35.0.0"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+
+      - name: Setup Rust & Android targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Cache Rust cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install dependencies & configure target
+        run: |
+          npm install
+          node scripts/configure-target.mjs "$TAURI_TARGET"
+          npx tauri icon icon-source.png
+
+      - name: Initialize & Build Android APK
+        run: |
+          npx tauri android init
+          npx tauri android build --apk
+
+      - name: Upload Android .apk Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: isyer-android-${{ inputs.target || 'my' }}-apk
+          path: src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
+          retention-days: 30
+

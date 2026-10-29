@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "İşyer varsayılan yetkileri",
+  "local": true,
+  "windows": ["main"],
+  "remote": {
+    "urls": ["https://*.isyer.com/*", "https://isyer.com/*"]
+  },
+  "permissions": ["core:default", "opener:default"]
+}
+

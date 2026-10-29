@@ -1,0 +1,143 @@
+name: Build iOS (.ipa)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Hangi uygulama derlensin? (my = Üye Uygulaması, app = İşletme Paneli)"
+        required: true
+        default: "my"
+        type: choice
+        options:
+          - my
+          - app
+  push:
+    branches:
+      - main
+
+jobs:
+  build-ios:
+    name: iOS (${{ inputs.target || 'my' }})
+    runs-on: macos-15
+    env:
+      TAURI_TARGET: ${{ inputs.target || 'my' }}
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_PROVISIONING_PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
+      APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+      APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+      APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+      APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust & iOS targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - name: Cache Rust cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Install dependencies & configure target
+        run: |
+          npm install
+          node scripts/configure-target.mjs "$TAURI_TARGET"
+          npx tauri icon icon-source.png
+
+      - name: Initialize Tauri iOS project
+        run: npx tauri ios init
+
+      - name: Check signing mode
+        id: mode
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_PROVISIONING_PROFILE" ] && [ -n "$APPLE_DEVELOPMENT_TEAM" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "==> Apple Developer sertifikası algılandı: İMZALI (.ipa) modunda derlenecek."
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "==> Apple Developer sertifikası girilmemiş: İMZASIZ (Unsigned .ipa) modunda derlenecek."
+          fi
+
+      # --- İMZALI MOD (Apple Developer Hesabı Eklendiğinde Otomatik Devreye Girer) ---
+      - name: Import Apple Certificate
+        if: steps.mode.outputs.signed == 'true'
+        uses: apple-actions/import-codesign-certs@v2
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+
+      - name: Install Provisioning Profile
+        if: steps.mode.outputs.signed == 'true'
+        run: |
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo "$APPLE_PROVISIONING_PROFILE" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
+
+      - name: Build Signed iOS IPA
+        if: steps.mode.outputs.signed == 'true'
+        run: |
+          npx tauri ios build --export-method app-store-connect --ci
+          mkdir -p dist-ipa
+          find src-tauri/gen/apple/build -name "*.ipa" -exec cp {} "dist-ipa/Isyer-${TAURI_TARGET}-signed.ipa" \;
+
+      # --- İMZASIZ MOD (Apple Developer Hesabı Yokken Varsayılan) ---
+      - name: Build Unsigned iOS IPA
+        if: steps.mode.outputs.signed == 'false'
+        run: |
+          # Önce Tauri'nin Rust statik kütüphanesini derlemesini sağla (imza hatası verse bile .a kütüphanesi oluşur)
+          npx tauri ios build --ci || true
+
+          WORKSPACE=$(find src-tauri/gen/apple -maxdepth 1 -name "*.xcworkspace" | head -n 1)
+          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list -json | python3 -c "import sys,json; print([s for s in json.load(sys.stdin)['workspace']['schemes'] if s.endswith('_iOS')][0])")
+
+          echo "==> Xcode Scheme: $SCHEME ($WORKSPACE)"
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath src-tauri/gen/apple/DerivedDataUnsigned \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            build
+
+          APP_PATH=$(find src-tauri/gen/apple/DerivedDataUnsigned -name "*.app" -path "*/Release-iphoneos/*" | head -n 1)
+          echo "==> Üretilen .app: $APP_PATH"
+          mkdir -p Payload dist-ipa
+          cp -R "$APP_PATH" Payload/
+          zip -qry "dist-ipa/Isyer-${TAURI_TARGET}-unsigned.ipa" Payload
+
+      - name: Upload iOS .ipa Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: isyer-ios-${{ inputs.target || 'my' }}-ipa
+          path: dist-ipa/*.ipa
+          retention-days: 30
+
+      # --- İsteğe Bağlı: TestFlight Otomatik Yükleme (API Anahtarı Girildiyse) ---
+      - name: Upload to TestFlight
+        if: steps.mode.outputs.signed == 'true' && env.APPSTORE_API_KEY_ID != ''
+        uses: apple-actions/upload-testflight-build@v1
+        with:
+          app-path: dist-ipa/Isyer-${{ inputs.target || 'my' }}-signed.ipa
+          issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+

@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <title>İşyer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        -webkit-tap-highlight-color: transparent;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      html,
+      body {
+        height: 100%;
+        background: #111318;
+        color: #f8fafc;
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Plus Jakarta Sans', 'Segoe UI', Roboto, sans-serif;
+        overflow: hidden;
+      }
+      .shell {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100dvh;
+        padding: calc(env(safe-area-inset-top, 0px) + 24px) 24px
+          calc(env(safe-area-inset-bottom, 0px) + 24px);
+        text-align: center;
+      }
+      .logo-wrap {
+        position: relative;
+        width: 88px;
+        height: 88px;
+        border-radius: 24px;
+        background: #181b22;
+        border: 1px solid rgba(200, 245, 38, 0.22);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+        margin-bottom: 24px;
+      }
+      .logo-wrap img {
+        width: 64px;
+        height: 64px;
+        border-radius: 16px;
+      }
+      .pulse-ring {
+        position: absolute;
+        inset: -6px;
+        border-radius: 28px;
+        border: 2px solid #c8f526;
+        opacity: 0.45;
+        animation: pulse 1.8s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          transform: scale(0.98);
+          opacity: 0.25;
+        }
+        50% {
+          transform: scale(1.06);
+          opacity: 0.65;
+        }
+      }
+      h1 {
+        font-size: 24px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+      .sub {
+        margin-top: 6px;
+        font-size: 14px;
+        color: #94a3b8;
+      }
+      .status {
+        margin-top: 28px;
+        font-size: 13px;
+        color: #cbd5e1;
+        max-width: 300px;
+        line-height: 1.5;
+      }
+      .offline-box {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+        margin-top: 24px;
+        padding: 18px 20px;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        max-width: 320px;
+      }
+      .offline-box.visible {
+        display: flex;
+      }
+      .offline-box p {
+        font-size: 13px;
+        color: #94a3b8;
+        line-height: 1.45;
+      }
+      .btn {
+        appearance: none;
+        border: none;
+        border-radius: 14px;
+        background: #c8f526;
+        color: #111318;
+        font-weight: 800;
+        font-size: 14px;
+        padding: 12px 22px;
+        cursor: pointer;
+        transition: transform 0.12s ease, filter 0.12s ease;
+      }
+      .btn:active {
+        transform: scale(0.97);
+        filter: brightness(0.95);
+      }
+      .switcher {
+        margin-top: 32px;
+        display: flex;
+        gap: 12px;
+      }
+      .link-btn {
+        background: transparent;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        color: #94a3b8;
+        border-radius: 999px;
+        padding: 7px 14px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+    </style>
+    <script src="./target.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <div class="logo-wrap">
+        <div class="pulse-ring" id="ring"></div>
+        <img src="./logo.png" alt="İşyer" />
+      </div>
+      <h1 id="app-title">İşyer</h1>
+      <p class="sub" id="app-sub">Üyelik, QR Giriş ve Randevu</p>
+      <p class="status" id="status-text">Bağlanıyor…</p>
+
+      <div class="offline-box" id="offline-box">
+        <p>
+          Sunucuya şu an ulaşılamıyor. İnternet bağlantını kontrol et; bağlantı geldiğinde
+          otomatik devam edilecek.
+        </p>
+        <button type="button" class="btn" id="retry-btn">Tekrar dene</button>
+      </div>
+
+      <div class="switcher">
+        <button type="button" class="link-btn" id="switch-my">Üye Ekranı (my)</button>
+        <button type="button" class="link-btn" id="switch-app">İşletme Paneli (app)</button>
+      </div>
+    </main>
+
+    <script>
+      (() => {
+        var target = window.ISYER_TARGET || {
+          key: 'my',
+          title: 'İşyer',
+          subtitle: 'Üyelik, QR Giriş ve Randevu',
+          url: 'https://my.isyer.com',
+        };
+
+        var savedUrl = null;
+        try {
+          savedUrl = localStorage.getItem('isyer:last_target_url');
+        } catch (_e) {}
+
+        var activeUrl = savedUrl || target.url;
+        var titleEl = document.getElementById('app-title');
+        var subEl = document.getElementById('app-sub');
+        var statusEl = document.getElementById('status-text');
+        var offlineBox = document.getElementById('offline-box');
+        var retryBtn = document.getElementById('retry-btn');
+
+        if (titleEl) titleEl.textContent = target.title;
+        if (subEl) subEl.textContent = target.subtitle;
+
+        function connect(urlToOpen) {
+          activeUrl = urlToOpen || activeUrl;
+          try {
+            localStorage.setItem('isyer:last_target_url', activeUrl);
+          } catch (_e) {}
+
+          if (offlineBox) offlineBox.classList.remove('visible');
+          if (statusEl) statusEl.textContent = 'Bağlanıyor…';
+
+          var controller = new AbortController();
+          var timer = setTimeout(() => {
+            controller.abort();
+          }, 6000);
+
+          fetch(`${activeUrl}/favicon.png`, {
+            mode: 'no-cors',
+            cache: 'no-store',
+            signal: controller.signal,
+          })
+            .then(() => {
+              clearTimeout(timer);
+              window.location.replace(activeUrl);
+            })
+            .catch(() => {
+              clearTimeout(timer);
+              if (statusEl) statusEl.textContent = 'İnternet bağlantısı bekleniyor';
+              if (offlineBox) offlineBox.classList.add('visible');
+            });
+        }
+
+        if (retryBtn) {
+          retryBtn.addEventListener('click', () => {
+            connect(activeUrl);
+          });
+        }
+
+        var btnMy = document.getElementById('switch-my');
+        var btnApp = document.getElementById('switch-app');
+        if (btnMy) {
+          btnMy.addEventListener('click', () => {
+            connect('https://my.isyer.com');
+          });
+        }
+        if (btnApp) {
+          btnApp.addEventListener('click', () => {
+            connect('https://app.isyer.com');
+          });
+        }
+
+        window.addEventListener('online', () => {
+          connect(activeUrl);
+        });
+
+        connect(activeUrl);
+      })();
+    </script>
+  </body>
+</html>

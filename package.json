@@ -1,0 +1,16 @@
+{
+  "name": "isyer-builder",
+  "version": "1.0.0",
+  "private": true,
+  "description": "İşyer iOS, Android ve Masaüstü (Tauri v2) Derleyici Kabuğu",
+  "scripts": {
+    "tauri": "tauri",
+    "icons": "tauri icon icon-source.png",
+    "target:my": "node scripts/configure-target.mjs my",
+    "target:app": "node scripts/configure-target.mjs app"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.5.0"
+  }
+}
+
