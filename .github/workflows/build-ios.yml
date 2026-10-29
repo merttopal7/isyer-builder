@@ -24,7 +24,8 @@ jobs:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
       APPLE_PROVISIONING_PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
-      APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+      APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM || '0000000000' }}
+      HAS_APPLE_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
       APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
       APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
       APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
@@ -58,12 +59,22 @@ jobs:
           npx tauri icon icon-source.png
 
       - name: Initialize Tauri iOS project
-        run: npx tauri ios init
+        run: |
+          NODE_BIN_DIR="$(dirname "$(which node)")"
+          echo "export PATH=\"$HOME/.cargo/bin:/opt/homebrew/bin:$NODE_BIN_DIR:\$PATH\"" >> ~/.zshenv
+          echo "export PATH=\"$HOME/.cargo/bin:/opt/homebrew/bin:$NODE_BIN_DIR:\$PATH\"" >> ~/.bash_profile
+          npx tauri ios init
+          for PLIST in src-tauri/gen/apple/*_iOS/Info.plist; do
+            if [ -f "$PLIST" ]; then
+              /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'Kapı QR kodunu okutarak hızlı giriş yapabilmeniz için kamera erişimi gereklidir.'" "$PLIST" 2>/dev/null || \
+              /usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription 'Kapı QR kodunu okutarak hızlı giriş yapabilmeniz için kamera erişimi gereklidir.'" "$PLIST"
+            fi
+          done
 
       - name: Check signing mode
         id: mode
         run: |
-          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_PROVISIONING_PROFILE" ] && [ -n "$APPLE_DEVELOPMENT_TEAM" ]; then
+          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_PROVISIONING_PROFILE" ] && [ -n "$HAS_APPLE_TEAM" ]; then
             echo "signed=true" >> "$GITHUB_OUTPUT"
             echo "==> Apple Developer sertifikası algılandı: İMZALI (.ipa) modunda derlenecek."
           else
@@ -96,15 +107,12 @@ jobs:
       - name: Build Unsigned iOS IPA
         if: steps.mode.outputs.signed == 'false'
         run: |
-          # Önce Tauri'nin Rust statik kütüphanesini derlemesini sağla (imza hatası verse bile .a kütüphanesi oluşur)
-          npx tauri ios build --ci || true
+          PROJECT=$(find src-tauri/gen/apple -maxdepth 1 -name "*.xcodeproj" | head -n 1)
+          SCHEME=$(xcodebuild -project "$PROJECT" -list -json | python3 -c "import sys,json; print([s for s in json.load(sys.stdin)['project']['schemes'] if s.endswith('_iOS')][0])")
 
-          WORKSPACE=$(find src-tauri/gen/apple -maxdepth 1 -name "*.xcworkspace" | head -n 1)
-          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list -json | python3 -c "import sys,json; print([s for s in json.load(sys.stdin)['workspace']['schemes'] if s.endswith('_iOS')][0])")
-
-          echo "==> Xcode Scheme: $SCHEME ($WORKSPACE)"
+          echo "==> Xcode Project: $PROJECT | Scheme: $SCHEME"
           xcodebuild \
-            -workspace "$WORKSPACE" \
+            -project "$PROJECT" \
             -scheme "$SCHEME" \
             -configuration Release \
             -sdk iphoneos \

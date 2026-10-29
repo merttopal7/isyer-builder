@@ -11,9 +11,6 @@ on:
         options:
           - app
           - my
-  push:
-    branches:
-      - main
 
 jobs:
   build-desktop:

@@ -41,6 +41,10 @@ if (conf.app?.windows?.[0]) {
   conf.app.windows[0].width = chosen.width;
   conf.app.windows[0].height = chosen.height;
 }
+if (!conf.bundle) conf.bundle = {};
+if (!conf.bundle.iOS) conf.bundle.iOS = {};
+const envTeam = (process.env.APPLE_DEVELOPMENT_TEAM || '').trim();
+conf.bundle.iOS.developmentTeam = envTeam || '0000000000';
 
 fs.writeFileSync(confPath, `${JSON.stringify(conf, null, 2)}\n`, 'utf8');
 
